@@ -100,15 +100,7 @@ class IndexTTSEventHandler(AsyncEventHandler):
             tmp_path = tmp_wav.name
 
         async with _TTS_LOCK:
-            tts = await loop.run_in_executor(
-                None,
-                partial(
-                    get_tts_model,
-                    self.model_version,
-                    self.checkpoint_dir,
-                    self.use_fp16,
-                ),
-            )
+            tts = get_tts_model(self.model_version, self.checkpoint_dir, self.use_fp16)
             await loop.run_in_executor(
                 None,
                 partial(

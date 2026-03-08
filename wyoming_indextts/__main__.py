@@ -111,6 +111,16 @@ async def main() -> None:
     }
     _LOGGER.info("Generation params: %s", generation_kwargs)
 
+    # Preload model at startup to eliminate cold-start on first request
+    from .handler import get_tts_model
+    _LOGGER.info("Loading TTS model (this may take a while)...")
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(
+        None,
+        partial(get_tts_model, args.model_version, args.checkpoint_dir, args.fp16),
+    )
+    _LOGGER.info("TTS model loaded")
+
     server = AsyncServer.from_uri(args.uri)
     _LOGGER.info("Ready")
 
