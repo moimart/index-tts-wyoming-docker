@@ -7,15 +7,17 @@ services:
     ports:
       - "10300:10300"
     volumes:
-      # Mount your reference voice file(s) here
+      # Drop your voice .wav files in ./voices/ — each becomes a selectable voice
       - ./voices:/app/voices
       # Persist model checkpoints across rebuilds
       - indextts-checkpoints:/app/checkpoints
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      # Path to the reference voice WAV for cloning (inside container)
-      - VOICE_FILE=/app/voices/reference.wav
+      # Directory containing reference voice WAV files
+      - VOICES_DIR=/app/voices
+      # Default voice (filename without .wav). Leave empty to use first found.
+      - DEFAULT_VOICE=
       # Model version: v1, v1.5, or v2
       - MODEL_VERSION=v2
       # Use FP16 for lower VRAM usage

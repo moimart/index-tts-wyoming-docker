@@ -1,14 +1,13 @@
 """Event handler for Wyoming IndexTTS server."""
 
 import asyncio
-import io
 import logging
 import math
 import tempfile
 import wave
 from functools import partial
 from pathlib import Path
-from typing import Optional
+from typing import Dict
 
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 from wyoming.event import Event
@@ -56,7 +55,8 @@ class IndexTTSEventHandler(AsyncEventHandler):
     def __init__(
         self,
         wyoming_info: Info,
-        voice_path: str,
+        voice_map: Dict[str, Path],
+        default_voice: str,
         checkpoint_dir: str,
         model_version: str,
         use_fp16: bool,
@@ -67,12 +67,27 @@ class IndexTTSEventHandler(AsyncEventHandler):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.wyoming_info_event = wyoming_info.event()
-        self.voice_path = voice_path
+        self.voice_map = voice_map
+        self.default_voice = default_voice
         self.checkpoint_dir = checkpoint_dir
         self.model_version = model_version
         self.use_fp16 = use_fp16
         self.samples_per_chunk = samples_per_chunk
         self.generation_kwargs = generation_kwargs
+
+    def _resolve_voice_path(self, synthesize: Synthesize) -> str:
+        """Pick the voice WAV path from the request, falling back to default."""
+        voice_name = None
+        if synthesize.voice and synthesize.voice.name:
+            voice_name = synthesize.voice.name
+
+        if voice_name and voice_name in self.voice_map:
+            return str(self.voice_map[voice_name])
+
+        if voice_name:
+            _LOGGER.warning("Unknown voice '%s', using default '%s'", voice_name, self.default_voice)
+
+        return str(self.voice_map[self.default_voice])
 
     async def handle_event(self, event: Event) -> bool:
         if Describe.is_type(event.type):
@@ -85,7 +100,9 @@ class IndexTTSEventHandler(AsyncEventHandler):
             return True
 
         synthesize = Synthesize.from_event(event)
-        _LOGGER.debug("Synthesize request: text='%s'", synthesize.text)
+        voice_path = self._resolve_voice_path(synthesize)
+        _LOGGER.debug("Synthesize: voice='%s', text='%s'",
+                       Path(voice_path).stem, synthesize.text)
 
         raw_text = synthesize.text
         text = " ".join(raw_text.strip().splitlines())
@@ -105,7 +122,7 @@ class IndexTTSEventHandler(AsyncEventHandler):
                 None,
                 partial(
                     tts.infer,
-                    spk_audio_prompt=self.voice_path,
+                    spk_audio_prompt=voice_path,
                     text=text,
                     output_path=tmp_path,
                     **self.generation_kwargs,
@@ -141,5 +158,6 @@ class IndexTTSEventHandler(AsyncEventHandler):
         # Clean up temp file
         Path(tmp_path).unlink(missing_ok=True)
 
-        _LOGGER.info("Synthesized %d bytes of audio for: %s", len(audio_bytes), text[:50])
+        _LOGGER.info("Synthesized %d bytes for voice '%s': %s",
+                      len(audio_bytes), Path(voice_path).stem, text[:50])
         return True

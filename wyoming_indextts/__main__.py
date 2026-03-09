@@ -17,12 +17,25 @@ from .handler import IndexTTSEventHandler
 _LOGGER = logging.getLogger(__name__)
 
 
+def discover_voices(voices_dir: Path) -> dict[str, Path]:
+    """Scan a directory for .wav files and return {name: path} mapping."""
+    voices = {}
+    for wav in sorted(voices_dir.glob("*.wav")):
+        voices[wav.stem] = wav
+    return voices
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Wyoming IndexTTS Server")
     parser.add_argument(
-        "--voice",
+        "--voices-dir",
         required=True,
-        help="Path to reference voice WAV file for cloning",
+        help="Directory containing reference voice WAV files",
+    )
+    parser.add_argument(
+        "--default-voice",
+        default=None,
+        help="Default voice name (filename stem) when none is specified by client",
     )
     parser.add_argument(
         "--checkpoint-dir",
@@ -64,12 +77,20 @@ async def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    voice_path = Path(args.voice)
-    if not voice_path.exists():
-        _LOGGER.error("Voice file not found: %s", args.voice)
-        raise FileNotFoundError(f"Voice file not found: {args.voice}")
+    voices_dir = Path(args.voices_dir)
+    if not voices_dir.is_dir():
+        raise FileNotFoundError(f"Voices directory not found: {voices_dir}")
 
-    _LOGGER.info("Using voice file: %s", args.voice)
+    voice_map = discover_voices(voices_dir)
+    if not voice_map:
+        raise FileNotFoundError(f"No .wav files found in {voices_dir}")
+
+    default_voice = args.default_voice or next(iter(voice_map))
+    if default_voice not in voice_map:
+        raise ValueError(f"Default voice '{default_voice}' not found. Available: {list(voice_map.keys())}")
+
+    _LOGGER.info("Discovered %d voice(s): %s", len(voice_map), list(voice_map.keys()))
+    _LOGGER.info("Default voice: %s", default_voice)
     _LOGGER.info("Using checkpoint dir: %s", args.checkpoint_dir)
     _LOGGER.info("Model version: %s", args.model_version)
 
@@ -85,8 +106,8 @@ async def main() -> None:
                 installed=True,
                 voices=[
                     TtsVoice(
-                        name=voice_path.stem,
-                        description=f"Cloned voice from {voice_path.name}",
+                        name=name,
+                        description=f"Cloned voice from {path.name}",
                         attribution=Attribution(
                             name="custom",
                             url="",
@@ -95,6 +116,7 @@ async def main() -> None:
                         version=__version__,
                         languages=["en", "zh"],
                     )
+                    for name, path in voice_map.items()
                 ],
                 version=__version__,
             )
@@ -129,7 +151,8 @@ async def main() -> None:
             partial(
                 IndexTTSEventHandler,
                 wyoming_info,
-                args.voice,
+                voice_map,
+                default_voice,
                 args.checkpoint_dir,
                 args.model_version,
                 args.fp16,

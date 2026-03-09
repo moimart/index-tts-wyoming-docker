@@ -2,7 +2,8 @@
 set -e
 
 CHECKPOINT_DIR="${CHECKPOINT_DIR:-/app/checkpoints}"
-VOICE_FILE="${VOICE_FILE:-/app/voices/reference.wav}"
+VOICES_DIR="${VOICES_DIR:-/app/voices}"
+DEFAULT_VOICE="${DEFAULT_VOICE:-}"
 MODEL_VERSION="${MODEL_VERSION:-v2}"
 URI="${URI:-tcp://0.0.0.0:10300}"
 FP16="${FP16:-true}"
@@ -23,32 +24,31 @@ if [ ! -f "${CHECKPOINT_DIR}/config.yaml" ]; then
     huggingface-cli download IndexTeam/IndexTTS-2 --local-dir="${CHECKPOINT_DIR}"
 fi
 
-# Generate a default reference voice if none is provided
-if [ ! -f "${VOICE_FILE}" ] || ! python3 -c "
-import wave, sys
-try:
-    w = wave.open('${VOICE_FILE}', 'rb')
-    w.close()
-except:
-    sys.exit(1)
-" 2>/dev/null; then
-    echo "No valid reference voice found at ${VOICE_FILE}"
-    echo "Generating a silent placeholder..."
-    echo "WARNING: For proper voice cloning, mount a real voice WAV file to ${VOICE_FILE}"
+# Ensure voices directory exists
+mkdir -p "${VOICES_DIR}"
+
+# Check for at least one WAV file
+WAV_COUNT=$(ls -1 "${VOICES_DIR}"/*.wav 2>/dev/null | wc -l)
+if [ "${WAV_COUNT}" -eq 0 ]; then
+    echo "No .wav files found in ${VOICES_DIR}"
+    echo "Generating a placeholder voice..."
+    echo "WARNING: For proper voice cloning, mount real voice WAV files to ${VOICES_DIR}/"
     python3 -c "
-import wave, struct
-with wave.open('${VOICE_FILE}', 'wb') as w:
+import wave
+with wave.open('${VOICES_DIR}/default.wav', 'wb') as w:
     w.setnchannels(1)
     w.setsampwidth(2)
     w.setframerate(22050)
-    # 3 seconds of silence
     w.writeframes(b'\x00' * 22050 * 2 * 3)
 "
-    echo "Generated placeholder voice at ${VOICE_FILE}"
+    echo "Generated placeholder at ${VOICES_DIR}/default.wav"
 fi
 
+echo "Voices in ${VOICES_DIR}:"
+ls -1 "${VOICES_DIR}"/*.wav 2>/dev/null || true
+
 ARGS=(
-    --voice "${VOICE_FILE}"
+    --voices-dir "${VOICES_DIR}"
     --checkpoint-dir "${CHECKPOINT_DIR}"
     --model-version "${MODEL_VERSION}"
     --uri "${URI}"
@@ -60,6 +60,10 @@ ARGS=(
     --max-mel-tokens "${MAX_MEL_TOKENS}"
 )
 
+if [ -n "${DEFAULT_VOICE}" ]; then
+    ARGS+=(--default-voice "${DEFAULT_VOICE}")
+fi
+
 if [ "${FP16}" = "true" ]; then
     ARGS+=(--fp16)
 fi
@@ -69,7 +73,8 @@ if [ "${DEBUG}" = "true" ]; then
 fi
 
 echo "Starting Wyoming IndexTTS server..."
-echo "  Voice: ${VOICE_FILE}"
+echo "  Voices dir: ${VOICES_DIR}"
+echo "  Default voice: ${DEFAULT_VOICE:-<first found>}"
 echo "  Checkpoints: ${CHECKPOINT_DIR}"
 echo "  Model: ${MODEL_VERSION}"
 echo "  URI: ${URI}"
